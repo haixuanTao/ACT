@@ -2,10 +2,11 @@ from config.config import POLICY_CONFIG, TASK_CONFIG, TRAIN_CONFIG, ROBOT_PORTS 
 
 import os
 import cv2
+from record_episodes import FOLLOWER_SERVO_IDS, add_redondant_servos_from_leader_to_follower, drop_redondant_servos_from_follower
 import torch
 import pickle
 import argparse
-from time import time
+from time import time, sleep
 
 from robot import Robot
 from training.utils import *
@@ -46,7 +47,7 @@ if __name__ == "__main__":
     if not all(c.isOpened() for c in cams):
         raise IOError("Cannot open camera")
     # init follower
-    follower = Robot(device_name=ROBOT_PORTS['follower'])
+    follower = Robot(device_name=ROBOT_PORTS['follower'], servo_ids=FOLLOWER_SERVO_IDS)
 
     # load the policy
     ckpt_path = os.path.join(train_cfg['checkpoint_dir'], task, train_cfg['eval_ckpt_name'])
@@ -74,9 +75,16 @@ if __name__ == "__main__":
         follower.read_position()
         _ = [capture_image(c) for c in cams]
     
+    qpos = follower.read_position()
+    qvel = follower.read_velocity()
+    action_time = time()
+
+    qpos = drop_redondant_servos_from_follower(qpos)
+    qvel = drop_redondant_servos_from_follower(qvel)
+
     obs = {
-        'qpos': pwm2pos(follower.read_position()),
-        'qvel': vel2pwm(follower.read_velocity()),
+        'qpos': pwm2pos(qpos),
+        'qvel': vel2pwm(qvel),
         'images': {cn: capture_image(cam) for cn, cam in zip(cfg['camera_names'], cams)}
     }
     os.system('spd-say "start"')
@@ -118,12 +126,22 @@ if __name__ == "__main__":
                 action = post_process(raw_action)
                 action = pos2pwm(action).astype(int)
                 ### take action
-                follower.set_goal_pos(action)
+                follower_action = add_redondant_servos_from_leader_to_follower(action)
+                sleep(max(0, 0.033 - (time() - action_time)))
+                print("step:", time() - action_time)
+                action_time = time()
+                follower.set_goal_pos(follower_action)
 
                 ### update obs
+                qpos = follower.read_position()
+                qvel = follower.read_velocity()
+
+                qpos = drop_redondant_servos_from_follower(qpos)
+                qvel = drop_redondant_servos_from_follower(qvel)
+
                 obs = {
-                    'qpos': pwm2pos(follower.read_position()),
-                    'qvel': vel2pwm(follower.read_velocity()),
+                    'qpos': pwm2pos(qpos),
+                    'qvel': vel2pwm(qvel),
                     'images': {cn: capture_image(cam) for cn, cam in zip(cfg['camera_names'], cams)}
                 }
                 ### store data
@@ -177,4 +195,4 @@ if __name__ == "__main__":
                 root[name][...] = array
     
     # disable torque
-    follower._disable_torque()
+    # follower._disable_torque()

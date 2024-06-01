@@ -17,21 +17,23 @@ os.environ['DEVICE'] = device
 
 # robot port names
 ROBOT_PORTS = {
-    'leader': '/dev/ttyACM1',
-    'follower': '/dev/ttyACM0'
+    'leader': '/dev/ttyDXL_master_right',
+    'follower': '/dev/ttyDXL_puppet_right'
 }
 
 
 # task config (you can add new tasks)
 TASK_CONFIG = {
     'dataset_dir': DATA_DIR,
-    'episode_len': 200,
-    'state_dim': 6,
-    'action_dim': 6,
+    'episode_len': 250,
+    'state_dim': 7,
+    'action_dim': 7,
     'cam_width': 640,
     'cam_height': 480,
-    'camera_names': ['front', 'top'],
-    'camera_port': ['/dev/video0', '/dev/video6'],
+    'camera_names': ['cam_left_wrist', 'cam_right_wrist', 'cam_low', 'cam_high'],
+    'camera_port': ['/dev/video2', '/dev/video22', '/dev/video14', '/dev/video8'],
+    #'camera_names': ['cam_right_wrist'],
+    #'camera_port': ['/dev/video22'],
 }
 
 
@@ -48,7 +50,8 @@ POLICY_CONFIG = {
     'enc_layers': 4,
     'dec_layers': 7,
     'nheads': 8,
-    'camera_names': ['front', 'top'],
+    'camera_names': ['cam_left_wrist', 'cam_right_wrist', 'cam_low', 'cam_high'],
+    #'camera_names': ['cam_right_wrist'],
     'policy_class': 'ACT',
     'temporal_agg': False
 }
@@ -56,7 +59,7 @@ POLICY_CONFIG = {
 # training config
 TRAIN_CONFIG = {
     'seed': 42,
-    'num_epochs': 1000,
+    'num_epochs': 2000,
     'batch_size_val': 8,
     'batch_size_train': 8,
     'eval_ckpt_name': 'policy_last.ckpt',

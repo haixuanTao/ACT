@@ -13,7 +13,7 @@ from robot import Robot
 # parse the task name via command line
 parser = argparse.ArgumentParser()
 parser.add_argument('--task', type=str, default='sort4')
-parser.add_argument('--num_episodes', type=int, default=10)
+parser.add_argument('--num_episodes', type=int, default=15)
 args = parser.parse_args()
 task = args.task
 num_episodes = args.num_episodes
@@ -37,6 +37,53 @@ def capture_image(cam):
     return image
 
 
+MAX_MASTER_GRIPER = 2554
+MAX_PUPPET_GRIPER = 3145
+
+MIN_MASTER_GRIPER = 1965
+MIN_PUPPET_GRIPER = 2500
+
+LEADER_GRIPPER_IDX = 6
+
+FOLLOWER_SERVO_IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+LEADER_SERVO_IDS = [1, 2, 4, 6, 7, 8, 9]
+
+def adapt_gripper_range_from_leader_to_follower(action):
+    gripper = action[LEADER_GRIPPER_IDX]
+    gripper = (gripper - MIN_MASTER_GRIPER) * (MAX_PUPPET_GRIPER - MIN_PUPPET_GRIPER)
+    gripper /= (MAX_MASTER_GRIPER - MIN_MASTER_GRIPER)
+    gripper += MIN_PUPPET_GRIPER
+    action[LEADER_GRIPPER_IDX] = gripper
+    return action
+
+def add_redondant_servos_from_leader_to_follower(action):
+    new_action = np.array([
+        action[0],
+        action[1],
+        action[1],
+        action[2],
+        action[2],
+        action[3],
+        action[4],
+        action[5],
+        action[6],
+    ])
+    return new_action
+
+def drop_redondant_servos_from_follower(state):
+    new_state = np.array([
+        state[0],
+        state[1],
+        state[3],
+        state[5],
+        state[6],
+        state[7],
+        state[8],
+    ])
+    return new_state
+
+
+
 if __name__ == "__main__":
     # init camera
     cams = [cv2.VideoCapture(p) for p in cfg['camera_port']]
@@ -44,16 +91,19 @@ if __name__ == "__main__":
     if not all(c.isOpened() for c in cams):
         raise IOError("Cannot open camera")
     # init follower
-    follower = Robot(device_name=ROBOT_PORTS['follower'])
+    follower = Robot(device_name=ROBOT_PORTS['follower'], servo_ids=FOLLOWER_SERVO_IDS)
     # init leader
-    leader = Robot(device_name=ROBOT_PORTS['leader'])
+    leader = Robot(device_name=ROBOT_PORTS['leader'], servo_ids=LEADER_SERVO_IDS)
     leader.set_trigger_torque()
 
     
     for i in range(num_episodes):
         # bring the follower to the leader and start camera
         for _ in range(200):
-            follower.set_goal_pos(leader.read_position())
+            action = leader.read_position()
+            action = adapt_gripper_range_from_leader_to_follower(action)
+            follower_action = add_redondant_servos_from_leader_to_follower(action)
+            follower.set_goal_pos(follower_action)
             _ = [capture_image(c) for c in cams]
         os.system(f'spd-say "go {i}"')
         # init buffers
@@ -63,6 +113,10 @@ if __name__ == "__main__":
             # observation
             qpos = follower.read_position()
             qvel = follower.read_velocity()
+
+            qpos = drop_redondant_servos_from_follower(qpos)
+            qvel = drop_redondant_servos_from_follower(qvel)
+
             images = [capture_image(c) for c in cams]
             images_stacked = np.hstack(images)
             images_stacked = cv2.cvtColor(images_stacked, cv2.COLOR_RGB2BGR)
@@ -74,8 +128,10 @@ if __name__ == "__main__":
             }
             # action (leader's position)
             action = leader.read_position()
+            action = adapt_gripper_range_from_leader_to_follower(action)
+            follower_action = add_redondant_servos_from_leader_to_follower(action)
             # apply action
-            follower.set_goal_pos(action)
+            follower.set_goal_pos(follower_action)
             action = pwm2pos(action)
             # store data
             obs_replay.append(obs)
@@ -130,7 +186,10 @@ if __name__ == "__main__":
             action = root.create_dataset('action', (max_timesteps, cfg['action_dim']))
             
             for name, array in data_dict.items():
-                root[name][...] = array
+                try:
+                    root[name][...] = array
+                except:
+                    breakpoint()
     
     leader._disable_torque()
     follower._disable_torque()
